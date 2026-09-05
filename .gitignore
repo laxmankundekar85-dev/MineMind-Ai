@@ -1,0 +1,16 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Generated installers and media exports
+*.exe
+*.apk
+*.mp4
+*.wav
+release/
+android-dist/

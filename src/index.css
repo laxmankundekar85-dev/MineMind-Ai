@@ -1,0 +1,629 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-display: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-sans: 'Inter', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    --bg-canvas: #F0F4F8;
+    --text-primary: #0B2238;
+    --surface-card: #FFFFFF;
+    --border-color: #D1DCE5;
+  }
+
+  html.dark {
+    --bg-canvas: #0B111E;
+    --text-primary: #F1F5F9;
+    --surface-card: #141C2B;
+    --border-color: #243147;
+    color-scheme: dark;
+  }
+
+  html.theme-amber {
+    --bg-canvas: #120E0A;
+    --text-primary: #FDE68A;
+    --surface-card: #1E1711;
+    --border-color: #452E17;
+    color-scheme: dark;
+  }
+
+  html.theme-contrast {
+    --bg-canvas: #000000;
+    --text-primary: #FFFFFF;
+    --surface-card: #0F0F0F;
+    --border-color: #F59E0B;
+    color-scheme: dark;
+  }
+
+  html.font-large {
+    font-size: 17px;
+  }
+
+  html.font-xlarge {
+    font-size: 18.5px;
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--bg-canvas);
+    color: var(--text-primary);
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+}
+
+/* ==========================================================================
+   Comprehensive Dark Mode & Accessible Theme Palette Overrides
+   ========================================================================== */
+
+/* 1. Dark Theme Overrides */
+html.dark #minemind-root-layout,
+html.dark main {
+  background-color: #0B111E !important;
+  color: #F1F5F9 !important;
+}
+
+html.dark header,
+html.dark #minemind-header,
+html.dark .bg-white,
+html.dark .bg-\[\#FFFFFF\] {
+  background-color: #141C2B !important;
+  color: #F8FAFC !important;
+  border-color: #26354D !important;
+}
+
+html.dark .bg-\[\#FAF8F3\],
+html.dark .bg-\[\#F7F5F0\],
+html.dark .bg-\[\#FDFBF7\],
+html.dark .bg-\[\#F1EDE4\],
+html.dark .bg-\[\#FAF7EE\],
+html.dark .bg-\[\#F8FAFC\] {
+  background-color: #192336 !important;
+  color: #F1F5F9 !important;
+  border-color: #26354D !important;
+}
+
+html.dark .bg-\[\#EFEBE2\],
+html.dark .bg-\[\#E2DDCF\],
+html.dark .bg-\[\#F1F5F9\] {
+  background-color: #1E293B !important;
+  color: #F1F5F9 !important;
+  border-color: #334155 !important;
+}
+
+/* Hover background states in dark mode */
+html.dark .hover\:bg-\[\#EFEBE2\]:hover,
+html.dark .hover\:bg-\[\#FAF8F3\]:hover,
+html.dark .hover\:bg-\[\#FDFBF7\]:hover,
+html.dark .hover\:bg-\[\#F1EDE4\]:hover,
+html.dark .hover\:bg-\[\#F1F5F9\]:hover,
+html.dark tr.hover\:bg-\[\#FDFBF7\]:hover,
+html.dark tr:hover {
+  background-color: #1E293B !important;
+}
+
+/* Borders & Dividers */
+html.dark .border-\[\#E4E0D6\],
+html.dark .border-\[\#EFEBE2\],
+html.dark .border-\[\#D4CEBF\],
+html.dark .border-\[\#E2DDCF\],
+html.dark .border-\[\#CBD5E1\] {
+  border-color: #26354D !important;
+}
+
+html.dark .divide-\[\#EFEBE2\] > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-\[\#E4E0D6\] > :not([hidden]) ~ :not([hidden]) {
+  border-color: #26354D !important;
+}
+
+/* High Contrast Font & Text Visibility in Dark Mode */
+html.dark h1,
+html.dark h2,
+html.dark h3,
+html.dark h4,
+html.dark h5,
+html.dark h6,
+html.dark .text-\[\#141C2B\],
+html.dark .text-\[\#0F172A\],
+html.dark .text-\[\#1E293B\],
+html.dark .text-slate-900,
+html.dark .text-gray-900 {
+  color: #F8FAFC !important;
+}
+
+html.dark .text-\[\#334155\],
+html.dark .text-\[\#475569\],
+html.dark .text-slate-700,
+html.dark .text-gray-700 {
+  color: #CBD5E1 !important;
+}
+
+html.dark .text-\[\#64748B\],
+html.dark .text-\[\#8F9BAE\],
+html.dark .text-slate-500,
+html.dark .text-gray-500 {
+  color: #94A3B8 !important;
+}
+
+/* Form Controls & Inputs in Dark Mode */
+html.dark input,
+html.dark select,
+html.dark textarea {
+  background-color: #192336 !important;
+  color: #F8FAFC !important;
+  border-color: #26354D !important;
+}
+
+html.dark input:focus,
+html.dark select:focus,
+html.dark textarea:focus {
+  border-color: #C8892E !important;
+  outline: none !important;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #64748B !important;
+}
+
+html.dark select option {
+  background-color: #141C2B !important;
+  color: #F8FAFC !important;
+}
+
+/* Status Badges & Notice Boxes in Dark Mode */
+html.dark .bg-\[\#FEF3C7\],
+html.dark .bg-\[\#FFFBEB\],
+html.dark .bg-amber-50,
+html.dark .bg-yellow-50 {
+  background-color: rgba(120, 53, 15, 0.45) !important;
+  border-color: rgba(217, 119, 6, 0.5) !important;
+}
+
+html.dark .text-\[\#92400E\],
+html.dark .text-\[\#78350F\],
+html.dark .text-\[\#D97706\],
+html.dark .text-amber-800,
+html.dark .text-yellow-800 {
+  color: #FDE68A !important;
+}
+
+html.dark .bg-\[\#FEF2F2\],
+html.dark .bg-\[\#FEE2E2\],
+html.dark .bg-red-50 {
+  background-color: rgba(127, 29, 29, 0.45) !important;
+  border-color: rgba(220, 38, 38, 0.5) !important;
+}
+
+html.dark .text-\[\#DC2626\],
+html.dark .text-\[\#991B1B\],
+html.dark .text-\[\#7F1D1D\],
+html.dark .text-\[\#B91C1C\],
+html.dark .text-red-700,
+html.dark .text-red-800 {
+  color: #FCA5A5 !important;
+}
+
+html.dark .bg-\[\#F0FDF4\],
+html.dark .bg-\[\#DCFCE7\],
+html.dark .bg-green-50 {
+  background-color: rgba(20, 83, 45, 0.45) !important;
+  border-color: rgba(22, 163, 74, 0.5) !important;
+}
+
+html.dark .text-\[\#166534\],
+html.dark .text-\[\#15803D\],
+html.dark .text-\[\#16A34A\],
+html.dark .text-green-700,
+html.dark .text-green-800 {
+  color: #86EFAC !important;
+}
+
+html.dark .bg-\[\#EFF6FF\],
+html.dark .bg-\[\#DBEAFE\],
+html.dark .bg-blue-50 {
+  background-color: rgba(30, 58, 138, 0.45) !important;
+  border-color: rgba(37, 99, 235, 0.5) !important;
+}
+
+html.dark .text-\[\#1E40AF\],
+html.dark .text-\[\#1D4ED8\],
+html.dark .text-\[\#2563EB\],
+html.dark .text-blue-700,
+html.dark .text-blue-800 {
+  color: #93C5FD !important;
+}
+
+/* Neutral metadata pills & subsidiary badges */
+html.dark span.bg-\[\#EFEBE2\],
+html.dark span.bg-\[\#FAF8F3\],
+html.dark span.bg-\[\#E2DDCF\] {
+  background-color: #1E293B !important;
+  color: #E2E8F0 !important;
+  border: 1px solid #334155 !important;
+}
+
+/* Table Headers in Dark Mode */
+html.dark thead tr,
+html.dark th {
+  background-color: #192336 !important;
+  color: #94A3B8 !important;
+  border-color: #26354D !important;
+}
+
+
+/* 2. Amber OLED Theme Overrides */
+html.theme-amber #minemind-root-layout,
+html.theme-amber main {
+  background-color: #100C08 !important;
+  color: #FDE68A !important;
+}
+
+html.theme-amber header,
+html.theme-amber #minemind-header,
+html.theme-amber .bg-white,
+html.theme-amber .bg-\[\#FFFFFF\] {
+  background-color: #1D150E !important;
+  color: #FDE68A !important;
+  border-color: #452E17 !important;
+}
+
+html.theme-amber .bg-\[\#FAF8F3\],
+html.theme-amber .bg-\[\#F7F5F0\],
+html.theme-amber .bg-\[\#FDFBF7\],
+html.theme-amber .bg-\[\#F1EDE4\],
+html.theme-amber .bg-\[\#EFEBE2\] {
+  background-color: #271D14 !important;
+  color: #FDE68A !important;
+  border-color: #523719 !important;
+}
+
+html.theme-amber .border-\[\#E4E0D6\],
+html.theme-amber .border-\[\#EFEBE2\],
+html.theme-amber .border-\[\#D4CEBF\] {
+  border-color: #523719 !important;
+}
+
+html.theme-amber h1,
+html.theme-amber h2,
+html.theme-amber h3,
+html.theme-amber h4,
+html.theme-amber h5,
+html.theme-amber h6,
+html.theme-amber .text-\[\#141C2B\],
+html.theme-amber .text-\[\#0F172A\],
+html.theme-amber .text-\[\#1E293B\] {
+  color: #FEF3C7 !important;
+}
+
+html.theme-amber .text-\[\#334155\],
+html.theme-amber .text-\[\#475569\],
+html.theme-amber .text-\[\#64748B\] {
+  color: #D97706 !important;
+}
+
+html.theme-amber input,
+html.theme-amber select,
+html.theme-amber textarea {
+  background-color: #271D14 !important;
+  color: #FEF3C7 !important;
+  border-color: #523719 !important;
+}
+
+
+/* 3. High Contrast DGMS Safety Mode */
+html.theme-contrast #minemind-root-layout,
+html.theme-contrast main {
+  background-color: #000000 !important;
+  color: #FFFFFF !important;
+}
+
+html.theme-contrast header,
+html.theme-contrast #minemind-header,
+html.theme-contrast .bg-white,
+html.theme-contrast .bg-\[\#FFFFFF\] {
+  background-color: #080808 !important;
+  color: #FFFFFF !important;
+  border-color: #F59E0B !important;
+}
+
+html.theme-contrast .bg-\[\#FAF8F3\],
+html.theme-contrast .bg-\[\#F7F5F0\],
+html.theme-contrast .bg-\[\#FDFBF7\],
+html.theme-contrast .bg-\[\#F1EDE4\],
+html.theme-contrast .bg-\[\#EFEBE2\] {
+  background-color: #141414 !important;
+  color: #FFFFFF !important;
+  border-color: #F59E0B !important;
+}
+
+html.theme-contrast .border-\[\#E4E0D6\],
+html.theme-contrast .border-\[\#EFEBE2\],
+html.theme-contrast .border-\[\#D4CEBF\] {
+  border-color: #F59E0B !important;
+}
+
+html.theme-contrast h1,
+html.theme-contrast h2,
+html.theme-contrast h3,
+html.theme-contrast h4,
+html.theme-contrast h5,
+html.theme-contrast h6,
+html.theme-contrast .text-\[\#141C2B\],
+html.theme-contrast .text-\[\#0F172A\],
+html.theme-contrast .text-\[\#1E293B\],
+html.theme-contrast .text-\[\#334155\],
+html.theme-contrast .text-\[\#475569\],
+html.theme-contrast .text-\[\#64748B\] {
+  color: #FFFFFF !important;
+}
+
+html.theme-contrast input,
+html.theme-contrast select,
+html.theme-contrast textarea {
+  background-color: #141414 !important;
+  color: #FFFFFF !important;
+  border-color: #F59E0B !important;
+}
+
+/* ==========================================================================
+   Recharts SVG Chart Dark Mode, Amber, and High Contrast Visibility
+   ========================================================================== */
+
+/* Dark Mode Charts */
+html.dark .recharts-cartesian-axis-tick text,
+html.dark .recharts-text,
+html.dark .recharts-cartesian-axis-tick-value {
+  fill: #CBD5E1 !important;
+  color: #CBD5E1 !important;
+}
+
+html.dark .recharts-cartesian-grid line,
+html.dark .recharts-cartesian-grid-horizontal line,
+html.dark .recharts-cartesian-grid-vertical line {
+  stroke: #334155 !important;
+  stroke-opacity: 0.4 !important;
+}
+
+html.dark .recharts-legend-item-text {
+  color: #CBD5E1 !important;
+}
+
+/* Amber OLED Mode Charts */
+html.theme-amber .recharts-cartesian-axis-tick text,
+html.theme-amber .recharts-text,
+html.theme-amber .recharts-cartesian-axis-tick-value {
+  fill: #FDE68A !important;
+  color: #FDE68A !important;
+}
+
+html.theme-amber .recharts-cartesian-grid line {
+  stroke: #523719 !important;
+  stroke-opacity: 0.6 !important;
+}
+
+html.theme-amber .recharts-legend-item-text {
+  color: #FDE68A !important;
+}
+
+/* DGMS High Contrast Mode Charts */
+html.theme-contrast .recharts-cartesian-axis-tick text,
+html.theme-contrast .recharts-text,
+html.theme-contrast .recharts-cartesian-axis-tick-value {
+  fill: #FFFFFF !important;
+  color: #FFFFFF !important;
+}
+
+html.theme-contrast .recharts-cartesian-grid line {
+  stroke: #F59E0B !important;
+  stroke-opacity: 0.5 !important;
+}
+
+html.theme-contrast .recharts-legend-item-text {
+  color: #FFFFFF !important;
+}
+
+/* Compact UI Density */
+html.compact-ui .p-6 {
+  padding: 1rem !important;
+}
+html.compact-ui .p-4 {
+  padding: 0.75rem !important;
+}
+html.compact-ui .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+  margin-top: 0.75rem !important;
+}
+
+.font-serif, .font-display {
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.font-sans {
+  font-family: 'Inter', 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.font-mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #EFEBE2;
+}
+::-webkit-scrollbar-thumb {
+  background: #D4CEBF;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #C8892E;
+}
+
+/* Subtle geological strata styling for login */
+.strata-bg {
+  background: radial-gradient(circle at 50% 20%, rgba(200, 137, 46, 0.08) 0%, transparent 60%),
+              linear-gradient(180deg, #141C2B 0%, #0D131F 100%);
+}
+
+@keyframes strataShift {
+  0% { transform: translateY(0px) rotate(0deg); }
+  50% { transform: translateY(-8px) rotate(0.5deg); }
+  100% { transform: translateY(0px) rotate(0deg); }
+}
+
+/* Report Generator Markdown & Print Styling */
+.report-markdown-body h1 {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #141C2B;
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.report-markdown-body h2 {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #141C2B;
+  margin-top: 1.5rem;
+  margin-bottom: 0.6rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid #E4E0D6;
+}
+
+.report-markdown-body h3 {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1E293B;
+  margin-top: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.report-markdown-body p {
+  font-size: 0.875rem;
+  line-height: 1.65;
+  color: #1E293B;
+  margin-bottom: 0.85rem;
+}
+
+.report-markdown-body hr {
+  border: 0;
+  border-top: 1px dashed #D4CEBF;
+  margin: 1.25rem 0;
+}
+
+.report-markdown-body ul {
+  list-style-type: disc;
+  padding-left: 1.5rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.report-markdown-body ol {
+  list-style-type: decimal;
+  padding-left: 1.5rem;
+  margin-bottom: 0.85rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.report-markdown-body li {
+  margin-bottom: 0.35rem;
+}
+
+.report-markdown-body strong {
+  font-weight: 700;
+  color: #0F172A;
+}
+
+.report-markdown-body em {
+  font-style: italic;
+  color: #475569;
+}
+
+.report-markdown-body blockquote {
+  border-left: 3px solid #C8892E;
+  padding-left: 1rem;
+  margin: 1rem 0;
+  color: #475569;
+  font-style: italic;
+}
+
+/* Dark mode markdown */
+html.dark .report-markdown-body h1,
+html.dark .report-markdown-body h2,
+html.dark .report-markdown-body h3,
+html.dark .report-markdown-body strong {
+  color: #F8FAFC !important;
+}
+
+html.dark .report-markdown-body p,
+html.dark .report-markdown-body li {
+  color: #CBD5E1 !important;
+}
+
+html.dark .report-markdown-body h2,
+html.dark .report-markdown-body hr {
+  border-color: #334155 !important;
+}
+
+/* High Quality Print & Export PDF Styling */
+@media print {
+  @page {
+    margin: 15mm 15mm 15mm 15mm;
+    size: A4 portrait;
+  }
+
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    font-size: 11pt !important;
+  }
+
+  #minemind-header,
+  #minemind-sidebar,
+  nav,
+  header,
+  .print\\:hidden {
+    display: none !important;
+  }
+
+  #minemind-root-layout,
+  main,
+  #report-generator-view {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    background: #ffffff !important;
+  }
+
+  .report-markdown-body {
+    background: #ffffff !important;
+    border: none !important;
+    padding: 0 !important;
+    color: #000000 !important;
+  }
+
+  .report-markdown-body h1,
+  .report-markdown-body h2,
+  .report-markdown-body h3,
+  .report-markdown-body strong {
+    color: #000000 !important;
+  }
+
+  .report-markdown-body p,
+  .report-markdown-body li {
+    color: #111111 !important;
+  }
+
+  .report-print-container {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+}

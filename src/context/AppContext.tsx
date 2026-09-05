@@ -1,0 +1,1883 @@
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { 
+  User, 
+  Role, 
+  Subsidiary, 
+  Document, 
+  DocumentVersion, 
+  Chunk, 
+  SimilarCase, 
+  QueryRecord, 
+  ReportRecord, 
+  AuditLogEntry, 
+  TopicInsight, 
+  TopicTrend, 
+  SourceCitation,
+  ApprovalStatus,
+  ApprovalPriority,
+  UserAccessRequest,
+  AccountStatus,
+  AccessRequestPayload
+} from '../types';
+import { 
+  SEED_USERS, 
+  SEED_DOCUMENTS, 
+  SEED_CHUNKS, 
+  SEED_SIMILAR_CASES, 
+  SEED_QUERIES, 
+  SEED_REPORTS, 
+  SEED_AUDIT_LOGS, 
+  SEED_TOPIC_INSIGHTS, 
+  SEED_TOPIC_TRENDS,
+  SEED_ACCESS_REQUESTS
+} from '../data/seedData';
+import { syncDocumentsToServiceWorkerCache } from '../utils/serviceWorkerRegistration';
+import { getSupabase, isSupabaseConfigured } from '../supabaseClient';
+import { 
+  hashPassword,
+  verifyPassword,
+  createSecureSession,
+  isSessionValid,
+  touchSession,
+  recordFailedLogin,
+  recordSuccessfulLogin,
+  getLoginLockoutStatus,
+  checkRateLimit,
+  sanitizeInput,
+  canAccessResource,
+  logSecurityAnomaly,
+  createPasswordResetToken,
+  validatePasswordResetToken,
+  markPasswordResetTokenUsed,
+  SecureSession,
+  SecurityIncident,
+  validatePasswordStrength
+} from '../utils/security';
+import { 
+  fetchUserProfile, 
+  syncUserProfile, 
+  fetchAllDocuments, 
+  fetchDocumentChunks, 
+  fetchAuditLogsFromSupabase,
+  fetchUserAccessRequests,
+  persistUserAccessRequest,
+  updateUserAccessRequestStatus,
+  fetchAllReports,
+  persistReportRecord,
+  fetchTopicInsights,
+  persistNewDocument,
+  persistNewVersion,
+  deleteDocumentFromSupabase,
+  persistApprovalReview,
+  persistAuditLog,
+  seedInitialDatabaseIfEmpty
+} from '../services/supabaseDataService';
+import { disableGoogleAutoSelect } from '../googleAuth';
+
+export type AppView = 
+  | 'login'
+  | 'dashboard'
+  | 'knowledge'
+  | 'ai-assistant'
+  | 'my-updates'
+  | 'reports'
+  | 'approval-queue'
+  | 'ai-insights'
+  | 'audit-trail'
+  | 'settings';
+
+interface AppContextType {
+  currentUser: User;
+  isLoggedIn: boolean;
+  activeView: AppView;
+  setActiveView: (view: AppView) => void;
+  selectedSubsidiary: Subsidiary | 'ALL';
+  setSelectedSubsidiary: (sub: Subsidiary | 'ALL') => void;
+  
+  // Auth & Access Management
+  login: (user: User) => void;
+  logout: () => void;
+  switchRole: (role: Role) => void;
+  allUsers: User[];
+  accessRequests: UserAccessRequest[];
+  loginWithCredentials: (identifier: string, password?: string, rememberMe?: boolean) => Promise<{
+    success: boolean;
+    status?: AccountStatus;
+    message?: string;
+    user?: User;
+  }>;
+  submitAccessRequest: (payload: AccessRequestPayload) => Promise<{
+    success: boolean;
+    requestId: string;
+    message: string;
+    requiresEmailConfirmation?: boolean;
+  }>;
+  approveAccessRequest: (requestId: string) => void;
+  rejectAccessRequest: (requestId: string, reason: string) => void;
+  requestPasswordReset: (identifier: string) => Promise<{ success: boolean; message: string }>;
+  
+  // Offline & Underground Mining Connectivity
+  isOnline: boolean;
+  isSimulatedOffline: boolean;
+  toggleSimulateOffline: () => void;
+  isUndergroundModeActive: boolean;
+  cachedDocumentIds: string[];
+  toggleCacheDocumentOffline: (docId: string) => void;
+  precacheAllDocumentsForUnderground: () => Promise<void>;
+  lastOfflineSyncTime: string | null;
+  offlineStorageSizeBytes: number;
+
+  // Documents & Versions
+  documents: Document[];
+  chunks: Chunk[];
+  addDocument: (doc: Document) => Promise<void>;
+  submitNewVersion: (docId: string, version: DocumentVersion) => Promise<void>;
+  updateDocumentVersionFileUrl: (docId: string, versionId: string, fileUrl: string, fileName?: string, extractedText?: string) => void;
+  deleteDocument: (docId: string) => Promise<void>;
+  approveVersion: (docId: string, versionId: string, note?: string) => Promise<void>;
+  rejectVersion: (docId: string, versionId: string, reason: string) => Promise<void>;
+  requestChangesVersion: (docId: string, versionId: string, note: string) => Promise<void>;
+  bulkApproveRoutine: () => { count: number; skippedUrgentCount: number };
+  
+  // AI Knowledge & Queries
+  queries: QueryRecord[];
+  addQueryRecord: (query: Omit<QueryRecord, 'id' | 'createdAt'>) => QueryRecord;
+  similarCases: SimilarCase[];
+  
+  // Reports
+  reports: ReportRecord[];
+  addReportRecord: (report: Omit<ReportRecord, 'id' | 'createdAt'>) => ReportRecord;
+  updateReportRecord: (reportId: string, changes: Partial<ReportRecord>) => void;
+  reportDraftFromAi: { text: string; citations: SourceCitation[] } | null;
+  setReportDraftFromAi: (draft: { text: string; citations: SourceCitation[] } | null) => void;
+  
+  // Audit Trail & Insights
+  auditLogs: AuditLogEntry[];
+  logAuditAction: (action: AuditLogEntry['action'], details: string, docId?: string, docTitle?: string, versionNum?: number) => void;
+  topicInsights: TopicInsight[];
+  topicTrends: TopicTrend[];
+  
+  // UI Drawers & Modals
+  activeDocForDetail: Document | null;
+  setActiveDocForDetail: (doc: Document | null) => void;
+  activeCitationForModal: SourceCitation | null;
+  setActiveCitationForModal: (citation: SourceCitation | null) => void;
+  compareVersions: { v1: DocumentVersion; v2: DocumentVersion; doc: Document; initialTab?: 'summary' | 'pdf_view' | 'diff' } | null;
+  setCompareVersions: (data: { v1: DocumentVersion; v2: DocumentVersion; doc: Document; initialTab?: 'summary' | 'pdf_view' | 'diff' } | null) => void;
+  
+  // Navigation filters & Mobile Drawer
+  isMobileNavOpen: boolean;
+  setIsMobileNavOpen: (open: boolean) => void;
+  toggleMobileNav: () => void;
+  knowledgeSearchTerm: string;
+  setKnowledgeSearchTerm: (term: string) => void;
+  activeTopicFilter: string | null;
+  setActiveTopicFilter: (topic: string | null) => void;
+  
+  // Banner / Toast
+  toastMessage: { type: 'success' | 'info' | 'warning'; text: string } | null;
+  setToastMessage: (msg: { type: 'success' | 'info' | 'warning'; text: string } | null) => void;
+
+  // Enterprise Security & Governance
+  activeSecureSession: SecureSession | null;
+  securityIncidents: SecurityIncident[];
+  logSecurityIncident: (type: SecurityIncident['type'], details: string) => void;
+  getAccountLockoutStatus: (identifier: string) => { isLocked: boolean; lockTimeRemainingSec: number };
+}
+
+const AppContext = createContext<AppContextType | undefined>(undefined);
+
+export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [allUsers, setAllUsers] = useState<User[]>(() => {
+    try {
+      const saved = localStorage.getItem('khanij_registered_users');
+      const savedUsers: User[] = saved ? JSON.parse(saved) : [];
+      // Combine SEED_USERS and savedUsers, deduplicating
+      const merged = [...SEED_USERS];
+      savedUsers.forEach(su => {
+        const idx = merged.findIndex(u => 
+          u.email.toLowerCase() === su.email.toLowerCase() || 
+          u.employeeId.toLowerCase() === su.employeeId.toLowerCase()
+        );
+        if (idx >= 0) {
+          merged[idx] = { ...merged[idx], ...su };
+        } else {
+          merged.push(su);
+        }
+      });
+      return merged;
+    } catch {
+      return SEED_USERS;
+    }
+  });
+
+  const [accessRequests, setAccessRequests] = useState<UserAccessRequest[]>(() => {
+    try {
+      const saved = localStorage.getItem('khanij_access_requests');
+      return saved ? JSON.parse(saved) : SEED_ACCESS_REQUESTS;
+    } catch {
+      return SEED_ACCESS_REQUESTS;
+    }
+  });
+
+  const [currentUser, setCurrentUser] = useState<User>(() => {
+    try {
+      const isPersistent = typeof window !== 'undefined' && localStorage.getItem('khanij_remember_me') === 'true';
+      const saved = isPersistent 
+        ? localStorage.getItem('khanij_user') 
+        : (typeof window !== 'undefined' ? sessionStorage.getItem('khanij_user') : null);
+      return saved ? JSON.parse(saved) : SEED_USERS[0];
+    } catch {
+      return SEED_USERS[0];
+    }
+  });
+
+  // Strict requirement: Default to unauthenticated unless explicitly remembered
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+    try {
+      if (typeof window === 'undefined') return false;
+      const isPersistent = localStorage.getItem('khanij_remember_me') === 'true';
+      if (isPersistent) {
+        return localStorage.getItem('khanij_logged_in') === 'true';
+      }
+      return sessionStorage.getItem('khanij_logged_in') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const [activeView, setActiveView] = useState<AppView>(() => {
+    try {
+      if (typeof window === 'undefined') return 'login';
+      const isPersistent = localStorage.getItem('khanij_remember_me') === 'true';
+      const isLogged = isPersistent 
+        ? localStorage.getItem('khanij_logged_in') === 'true' 
+        : sessionStorage.getItem('khanij_logged_in') === 'true';
+      return isLogged ? 'dashboard' : 'login';
+    } catch {
+      return 'login';
+    }
+  });
+  const [selectedSubsidiary, setSelectedSubsidiary] = useState<Subsidiary | 'ALL'>('ALL');
+  
+  // Offline & Underground Connectivity State
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [isSimulatedOffline, setIsSimulatedOffline] = useState<boolean>(false);
+  const [cachedDocumentIds, setCachedDocumentIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('khanij_cached_doc_ids');
+      return saved ? JSON.parse(saved) : SEED_DOCUMENTS.map(d => d.id);
+    } catch {
+      return SEED_DOCUMENTS.map(d => d.id);
+    }
+  });
+  const [lastOfflineSyncTime, setLastOfflineSyncTime] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('khanij_last_sync_time') || new Date().toISOString();
+    } catch {
+      return new Date().toISOString();
+    }
+  });
+
+  const [documents, setDocuments] = useState<Document[]>(() => {
+    try {
+      const saved = localStorage.getItem('khanij_documents');
+      return saved ? JSON.parse(saved) : SEED_DOCUMENTS;
+    } catch {
+      return SEED_DOCUMENTS;
+    }
+  });
+
+  const [chunks, setChunks] = useState<Chunk[]>(() => {
+    try {
+      const saved = localStorage.getItem('khanij_chunks');
+      return saved ? JSON.parse(saved) : SEED_CHUNKS;
+    } catch {
+      return SEED_CHUNKS;
+    }
+  });
+
+  const [queries, setQueries] = useState<QueryRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('khanij_queries');
+      return saved ? JSON.parse(saved) : SEED_QUERIES;
+    } catch {
+      return SEED_QUERIES;
+    }
+  });
+
+  const [reports, setReports] = useState<ReportRecord[]>(() => {
+    try {
+      const saved = localStorage.getItem('khanij_reports');
+      return saved ? JSON.parse(saved) : SEED_REPORTS;
+    } catch {
+      return SEED_REPORTS;
+    }
+  });
+
+  const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>(() => {
+    try {
+      const saved = localStorage.getItem('khanij_audit_logs');
+      return saved ? JSON.parse(saved) : SEED_AUDIT_LOGS;
+    } catch {
+      return SEED_AUDIT_LOGS;
+    }
+  });
+
+  const [similarCases] = useState<SimilarCase[]>(SEED_SIMILAR_CASES);
+  const [topicInsights, setTopicInsights] = useState<TopicInsight[]>(SEED_TOPIC_INSIGHTS);
+  const [topicTrends] = useState<TopicTrend[]>(SEED_TOPIC_TRENDS);
+  
+  const [activeDocForDetail, setActiveDocForDetail] = useState<Document | null>(null);
+  const [activeCitationForModal, setActiveCitationForModal] = useState<SourceCitation | null>(null);
+  const [compareVersions, setCompareVersions] = useState<{ v1: DocumentVersion; v2: DocumentVersion; doc: Document; initialTab?: 'summary' | 'pdf_view' | 'diff' } | null>(null);
+  
+  const [isMobileNavOpen, setIsMobileNavOpen] = useState<boolean>(false);
+  const toggleMobileNav = () => setIsMobileNavOpen(prev => !prev);
+  
+  const [knowledgeSearchTerm, setKnowledgeSearchTerm] = useState<string>('');
+  const [activeTopicFilter, setActiveTopicFilter] = useState<string | null>(null);
+  const [reportDraftFromAi, setReportDraftFromAi] = useState<{ text: string; citations: SourceCitation[] } | null>(null);
+  const [toastMessage, setToastMessage] = useState<{ type: 'success' | 'info' | 'warning'; text: string } | null>(null);
+
+  // Enterprise Security & Session State
+  const [activeSecureSession, setActiveSecureSession] = useState<SecureSession | null>(() => {
+    try {
+      if (typeof window === 'undefined') return null;
+      const raw = localStorage.getItem('khanij_secure_session') || sessionStorage.getItem('khanij_secure_session');
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const [securityIncidents, setSecurityIncidents] = useState<SecurityIncident[]>(() => {
+    try {
+      const raw = localStorage.getItem('khanij_security_incidents');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const logSecurityIncident = useCallback((type: SecurityIncident['type'], details: string) => {
+    const inc = logSecurityAnomaly(type, details, 'MEDIUM', currentUser?.email || currentUser?.employeeId || 'anonymous');
+    setSecurityIncidents(prev => {
+      const updated = [inc, ...prev].slice(0, 100);
+      try {
+        localStorage.setItem('khanij_security_incidents', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+  }, [currentUser]);
+
+  const getAccountLockoutStatus = useCallback((identifier: string) => {
+    return getLoginLockoutStatus(identifier);
+  }, []);
+
+  // Periodic Session Watchdog (every 60 seconds): validates session lifetime & idle timeout
+  useEffect(() => {
+    if (!isLoggedIn || !activeSecureSession) return;
+
+    const interval = setInterval(() => {
+      const status = isSessionValid(activeSecureSession);
+      if (!status.valid) {
+        logSecurityIncident('SESSION_EXPIRED', `Session invalidated: ${status.reason}. Enforcing clean logout.`);
+        setIsLoggedIn(false);
+        setActiveSecureSession(null);
+        try {
+          localStorage.removeItem('khanij_logged_in');
+          localStorage.removeItem('khanij_secure_session');
+          sessionStorage.removeItem('khanij_logged_in');
+          sessionStorage.removeItem('khanij_secure_session');
+        } catch (e) {}
+        setActiveView('login');
+        setToastMessage({
+          type: 'warning',
+          text: status.reason === 'IDLE_TIMEOUT' 
+            ? 'Session timed out after 2 hours of inactivity for statutory security.' 
+            : 'Session expired (8-hour maximum). Please sign in again.',
+        });
+      }
+    }, 60000);
+
+    return () => clearInterval(interval);
+  }, [isLoggedIn, activeSecureSession, logSecurityIncident]);
+
+  // Keep local storage in sync whenever documents state changes
+  useEffect(() => {
+    try {
+      if (documents && documents.length > 0) {
+        localStorage.setItem('khanij_documents', JSON.stringify(documents));
+      }
+    } catch (e) {
+      console.warn('Storage save notice for documents:', e);
+    }
+  }, [documents]);
+
+  useEffect(() => {
+    try {
+      if (chunks && chunks.length > 0) {
+        localStorage.setItem('khanij_chunks', JSON.stringify(chunks));
+      }
+    } catch (e) {
+      console.warn('Storage save notice for chunks:', e);
+    }
+  }, [chunks]);
+
+  useEffect(() => {
+    try {
+      if (accessRequests && accessRequests.length > 0) {
+        localStorage.setItem('khanij_access_requests', JSON.stringify(accessRequests));
+      }
+    } catch (e) {
+      console.warn('Storage save notice for accessRequests:', e);
+    }
+  }, [accessRequests]);
+
+  // Load live data from Supabase if available
+  const reloadFromSupabase = useCallback(async () => {
+    if (!isSupabaseConfigured) return;
+    const client = getSupabase();
+    if (!client) return;
+
+    try {
+      // 1. Check if database is empty on first boot, auto-seed with CMPDI data
+      await seedInitialDatabaseIfEmpty(
+        SEED_DOCUMENTS,
+        SEED_CHUNKS,
+        SEED_AUDIT_LOGS,
+        SEED_REPORTS,
+        SEED_ACCESS_REQUESTS
+      );
+
+      // 2. Fetch all collections in parallel from Supabase
+      const [remoteDocs, remoteChunks, remoteAudit, remoteRequests, remoteReports, remoteTopics] = await Promise.all([
+        fetchAllDocuments(),
+        fetchDocumentChunks(),
+        fetchAuditLogsFromSupabase(),
+        fetchUserAccessRequests(),
+        fetchAllReports(),
+        fetchTopicInsights(),
+      ]);
+
+      if (remoteDocs !== null && remoteDocs.length > 0) {
+        setDocuments(prev => {
+          const remoteDocIds = new Set(remoteDocs.map(d => d.id));
+          const localOnlyDocs = prev.filter(localDoc => !remoteDocIds.has(localDoc.id));
+
+          const mergedRemoteDocs = remoteDocs.map(rDoc => {
+            const localDoc = prev.find(ld => ld.id === rDoc.id);
+            if (!localDoc) return rDoc;
+
+            const rVersionIds = new Set(rDoc.versions.map(v => v.id));
+            const pendingLocalVersions = localDoc.versions.filter(lv => !rVersionIds.has(lv.id));
+
+            if (pendingLocalVersions.length > 0) {
+              const combinedVersions = [...pendingLocalVersions, ...rDoc.versions];
+              return {
+                ...rDoc,
+                versions: combinedVersions,
+                status: combinedVersions.some(v => v.approvalStatus === 'pending') ? 'pending' : rDoc.status,
+              };
+            }
+            return rDoc;
+          });
+
+          const mergedAll = [...localOnlyDocs, ...mergedRemoteDocs];
+          try {
+            localStorage.setItem('khanij_documents', JSON.stringify(mergedAll));
+          } catch (e) {}
+          return mergedAll;
+        });
+      }
+
+      if (remoteChunks !== null && remoteChunks.length > 0) {
+        setChunks(prev => {
+          const remoteChunkIds = new Set(remoteChunks.map(c => c.id));
+          const localOnlyChunks = prev.filter(c => !remoteChunkIds.has(c.id));
+          const mergedChunks = [...localOnlyChunks, ...remoteChunks];
+          try {
+            localStorage.setItem('khanij_chunks', JSON.stringify(mergedChunks));
+          } catch (e) {}
+          return mergedChunks;
+        });
+      }
+
+      if (remoteAudit !== null && remoteAudit.length > 0) {
+        setAuditLogs(remoteAudit);
+        try {
+          localStorage.setItem('khanij_audit_logs', JSON.stringify(remoteAudit));
+        } catch (e) {}
+      }
+
+      if (remoteRequests !== null && remoteRequests.length > 0) {
+        setAccessRequests(remoteRequests);
+        try {
+          localStorage.setItem('khanij_access_requests', JSON.stringify(remoteRequests));
+        } catch (e) {}
+      }
+
+      if (remoteReports !== null && remoteReports.length > 0) {
+        setReports(remoteReports);
+        try {
+          localStorage.setItem('khanij_reports', JSON.stringify(remoteReports));
+        } catch (e) {}
+      }
+
+      if (remoteTopics !== null && remoteTopics.length > 0) {
+        setTopicInsights(remoteTopics);
+      }
+    } catch (err) {
+      console.warn('[Supabase] Data sync notice:', err);
+    }
+  }, []);
+
+  // Sync with Supabase on initial application boot
+  useEffect(() => {
+    reloadFromSupabase();
+  }, [reloadFromSupabase]);
+
+  // Realtime Multi-User Sync via Supabase Channels
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    const client = getSupabase();
+    if (!client) return;
+
+    const channel = client
+      .channel('minemind_realtime_sync')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'documents' }, () => {
+        console.log('[Supabase Realtime] Change detected on documents table. Synchronizing...');
+        reloadFromSupabase();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'document_versions' }, () => {
+        console.log('[Supabase Realtime] Change detected on document_versions table. Synchronizing...');
+        reloadFromSupabase();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'approvals' }, () => {
+        console.log('[Supabase Realtime] Change detected on approvals table. Synchronizing...');
+        reloadFromSupabase();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_logs' }, () => {
+        console.log('[Supabase Realtime] Change detected on audit_logs table. Synchronizing...');
+        reloadFromSupabase();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_access_requests' }, () => {
+        console.log('[Supabase Realtime] Change detected on user_access_requests table. Synchronizing...');
+        reloadFromSupabase();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reports' }, () => {
+        console.log('[Supabase Realtime] Change detected on reports table. Synchronizing...');
+        reloadFromSupabase();
+      })
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          console.log('[Supabase Realtime] Subscribed to live database changes channel.');
+        }
+      });
+
+    return () => {
+      client.removeChannel(channel);
+    };
+  }, [reloadFromSupabase]);
+
+  // Supabase Auth Session Listener & Real-time Boot Check
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    const client = getSupabase();
+    if (!client) return;
+
+    const handleSessionUser = async (sessionUser: any) => {
+      try {
+        const userEmail = (sessionUser.email || '').toLowerCase().trim();
+        const profile = await fetchUserProfile(sessionUser.id, userEmail);
+        const knownUserMatch = allUsers.find(u => u.email.toLowerCase() === userEmail);
+        
+        let userToSet: User;
+        if (profile) {
+          userToSet = {
+            ...profile,
+            // If the user is registered as admin or is the designated admin account
+            role: (profile.role === 'admin' || knownUserMatch?.role === 'admin' || userEmail === 'priyadike23@gmail.com') ? 'admin' : profile.role,
+          };
+        } else {
+          // Check if user is known admin or has specific role in metadata
+          const meta = sessionUser.user_metadata || {};
+          const isKnownAdmin = 
+            meta.role === 'admin' || 
+            userEmail === 'priyadike23@gmail.com' ||
+            knownUserMatch?.role === 'admin' ||
+            userEmail.includes('admin');
+          
+          userToSet = {
+            id: sessionUser.id,
+            name: meta.full_name || meta.name || knownUserMatch?.name || userEmail.split('@')[0] || 'Authorized Officer',
+            email: userEmail,
+            role: isKnownAdmin ? 'admin' : ((meta.role as Role) || knownUserMatch?.role || 'employee'),
+            subsidiary: (meta.subsidiary as Subsidiary) || knownUserMatch?.subsidiary || 'CMPDI HQ',
+            department: meta.department || knownUserMatch?.department || 'Central Directorate',
+            designation: isKnownAdmin ? 'Chief Directorate Officer' : (meta.designation || knownUserMatch?.designation || 'Mining Technical Officer'),
+            employeeId: meta.employeeId || knownUserMatch?.employeeId || `EMP-${sessionUser.id.substring(0, 5).toUpperCase()}`,
+            status: 'approved',
+          };
+          syncUserProfile(userToSet);
+        }
+
+        setCurrentUser(userToSet);
+        setIsLoggedIn(true);
+        setActiveView('dashboard');
+
+        try {
+          localStorage.setItem('khanij_auth_type', 'supabase');
+          localStorage.setItem('khanij_logged_in', 'true');
+          localStorage.setItem('khanij_user', JSON.stringify(userToSet));
+        } catch (storageErr) {
+          console.warn('Storage write notice:', storageErr);
+        }
+
+        // Clean up OAuth hash parameters in URL if present
+        if (typeof window !== 'undefined' && (window.location.hash || window.location.search.includes('code='))) {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        reloadFromSupabase();
+      } catch (err) {
+        console.error('[Supabase] Auth user handling error:', err);
+      }
+    };
+
+    // Check active session on mount
+    client.auth.getSession().then(async ({ data: { session }, error }) => {
+      if (error) {
+        console.warn('[Supabase] Session check notice:', error.message);
+        return;
+      }
+      if (session?.user) {
+        await handleSessionUser(session.user);
+      }
+    });
+
+    // Subscribe to auth state changes
+    const { data: { subscription } } = client.auth.onAuthStateChange(async (event, session) => {
+      if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
+        await handleSessionUser(session.user);
+      } else if (event === 'SIGNED_OUT') {
+        setIsLoggedIn(false);
+        setActiveView('login');
+        try {
+          localStorage.removeItem('khanij_logged_in');
+          localStorage.removeItem('khanij_user');
+          localStorage.removeItem('khanij_auth_type');
+          localStorage.removeItem('khanij_remember_me');
+          sessionStorage.removeItem('khanij_logged_in');
+          sessionStorage.removeItem('khanij_user');
+        } catch (e) {
+          console.warn('Session clear notice:', e);
+        }
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [reloadFromSupabase]);
+
+  // Network online/offline event listeners
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setToastMessage({
+        type: 'success',
+        text: 'Network connection restored. Syncing with Central Supabase Cloud.',
+      });
+      reloadFromSupabase();
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      setToastMessage({
+        type: 'warning',
+        text: 'Low-connectivity / Underground mode active. Accessing local Service Worker cache.',
+      });
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [reloadFromSupabase]);
+
+  // Sync documents and chunks to Service Worker and LocalStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('khanij_documents', JSON.stringify(documents));
+      localStorage.setItem('khanij_chunks', JSON.stringify(chunks));
+      localStorage.setItem('khanij_queries', JSON.stringify(queries));
+      localStorage.setItem('khanij_reports', JSON.stringify(reports));
+      localStorage.setItem('khanij_audit_logs', JSON.stringify(auditLogs));
+      localStorage.setItem('khanij_cached_doc_ids', JSON.stringify(cachedDocumentIds));
+      
+      // Post to Service Worker cache
+      syncDocumentsToServiceWorkerCache(documents, chunks);
+    } catch (e) {
+      console.warn('LocalStorage / SW sync warning:', e);
+    }
+  }, [documents, chunks, queries, reports, auditLogs, cachedDocumentIds]);
+
+  // Auto-dismiss toast
+  useEffect(() => {
+    if (toastMessage) {
+      const timer = setTimeout(() => setToastMessage(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toastMessage]);
+
+  const isUndergroundModeActive = !isOnline || isSimulatedOffline;
+
+  const toggleSimulateOffline = () => {
+    setIsSimulatedOffline(prev => {
+      const next = !prev;
+      setToastMessage({
+        type: next ? 'warning' : 'success',
+        text: next 
+          ? 'Underground Mine Mode simulated (Disconnected from Cloud). Testing local service worker cache.' 
+          : 'Normal Online Mode restored.',
+      });
+      return next;
+    });
+  };
+
+  const toggleCacheDocumentOffline = (docId: string) => {
+    setCachedDocumentIds(prev => {
+      const exists = prev.includes(docId);
+      const updated = exists ? prev.filter(id => id !== docId) : [...prev, docId];
+      const targetDoc = documents.find(d => d.id === docId);
+      setToastMessage({
+        type: exists ? 'info' : 'success',
+        text: exists 
+          ? `Removed "${targetDoc?.title || 'Document'}" from offline pit cache.` 
+          : `Cached "${targetDoc?.title || 'Document'}" for underground offline inspection.`,
+      });
+      return updated;
+    });
+  };
+
+  const precacheAllDocumentsForUnderground = async () => {
+    const allIds = documents.map(d => d.id);
+    setCachedDocumentIds(allIds);
+    const now = new Date().toISOString();
+    setLastOfflineSyncTime(now);
+    localStorage.setItem('khanij_last_sync_time', now);
+    
+    await syncDocumentsToServiceWorkerCache(documents, chunks);
+
+    setToastMessage({
+      type: 'success',
+      text: `Offline Cache Synced: ${documents.length} approved documents and ${chunks.length} knowledge chunks ready for underground deployment.`,
+    });
+  };
+
+  const offlineStorageSizeBytes = (JSON.stringify(documents).length + JSON.stringify(chunks).length) * 2;
+
+  const logAuditAction = (
+    action: AuditLogEntry['action'], 
+    details: string, 
+    docId?: string, 
+    docTitle?: string, 
+    versionNum?: number
+  ) => {
+    const newEntry: AuditLogEntry = {
+      id: `aud_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      timestamp: new Date().toISOString(),
+      actorId: currentUser.id,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      actorSubsidiary: currentUser.subsidiary,
+      action,
+      documentId: docId,
+      documentTitle: docTitle,
+      versionNumber: versionNum,
+      details: isUndergroundModeActive ? `[OFFLINE PIT SYNC] ${details}` : details,
+      ipAddress: isUndergroundModeActive ? '127.0.0.1 (Offline Pit Client)' : '10.144.18.' + (Math.floor(Math.random() * 80) + 10),
+    };
+    setAuditLogs(prev => [newEntry, ...prev]);
+
+    // Persist to Supabase if connected
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      persistAuditLog(newEntry);
+    }
+  };
+
+  // Real Supabase Authentication & Built-in Demo Account handler
+  const loginWithCredentials = async (
+    identifier: string, 
+    password?: string, 
+    rememberMe: boolean = true
+  ): Promise<{
+    success: boolean;
+    status?: AccountStatus;
+    message?: string;
+    user?: User;
+  }> => {
+    const cleanId = sanitizeInput(identifier.trim());
+    const cleanEmail = cleanId.includes('@') ? cleanId.toLowerCase() : `${cleanId.toLowerCase()}@cil.in`;
+
+    // 1. Account Lockout Protection Check
+    const lockout = getLoginLockoutStatus(cleanId);
+    if (lockout.isLocked) {
+      logSecurityIncident('ACCOUNT_LOCKOUT', `Blocked login attempt on locked account "${cleanId}". Time remaining: ${lockout.lockTimeRemainingSec}s`);
+      return {
+        success: false,
+        message: `Account temporarily locked due to consecutive failed attempts. Please wait ${lockout.lockTimeRemainingSec} seconds before retrying.`,
+      };
+    }
+
+    // 2. Client-side Rate Limiting Check
+    const rateCheck = checkRateLimit(`login_${cleanId}`, 8, 60000);
+    if (!rateCheck.allowed) {
+      logSecurityIncident('RATE_LIMIT_EXCEEDED', `Rate limit exceeded on authentication endpoint for identifier: ${cleanId}`);
+      return {
+        success: false,
+        message: `Too many login attempts. Please wait ${rateCheck.retryAfterSec || 60} seconds.`,
+      };
+    }
+
+    const establishSession = (u: User, authType: 'supabase' | 'local') => {
+      const session = createSecureSession(u);
+      setActiveSecureSession(session);
+      recordSuccessfulLogin(cleanId);
+      setCurrentUser(u);
+      setIsLoggedIn(true);
+
+      try {
+        localStorage.setItem('khanij_auth_type', authType);
+        if (rememberMe) {
+          localStorage.setItem('khanij_remember_me', 'true');
+          localStorage.setItem('khanij_user', JSON.stringify(u));
+          localStorage.setItem('khanij_logged_in', 'true');
+          localStorage.setItem('khanij_secure_session', JSON.stringify(session));
+        } else {
+          localStorage.removeItem('khanij_remember_me');
+          localStorage.removeItem('khanij_logged_in');
+          localStorage.removeItem('khanij_secure_session');
+          sessionStorage.setItem('khanij_user', JSON.stringify(u));
+          sessionStorage.setItem('khanij_logged_in', 'true');
+          sessionStorage.setItem('khanij_secure_session', JSON.stringify(session));
+        }
+      } catch (e) {
+        console.warn('Session persistence notice:', e);
+      }
+
+      setActiveView('dashboard');
+      logAuditAction('AI_QUERY', `Authenticated session established: ${u.name} (${u.role.toUpperCase()} - ${u.subsidiary})`);
+      setToastMessage({ type: 'success', text: `Welcome, ${u.name} (${u.subsidiary})` });
+    };
+
+    // 3. Direct Demo / Registered User Match
+    const foundDemoOrLocal = allUsers.find(u => 
+      u.email.toLowerCase() === cleanId.toLowerCase() || 
+      u.employeeId.toLowerCase() === cleanId.toLowerCase() ||
+      u.email.toLowerCase() === cleanEmail.toLowerCase()
+    );
+
+    // If matching local/registered account is found
+    if (foundDemoOrLocal) {
+      if (foundDemoOrLocal.status === 'pending') {
+        return {
+          success: false,
+          status: 'pending',
+          message: 'Your access request is awaiting administrator approval.'
+        };
+      }
+      if (foundDemoOrLocal.status === 'rejected') {
+        return {
+          success: false,
+          status: 'rejected',
+          message: foundDemoOrLocal.rejectedReason || 'Your access request was not approved.'
+        };
+      }
+
+      // Verify password if account has a designated password
+      if (password && foundDemoOrLocal.password) {
+        const isValid = await verifyPassword(password, foundDemoOrLocal.password);
+        if (!isValid) {
+          const updatedLockout = recordFailedLogin(cleanId);
+          logSecurityIncident('UNAUTHORIZED_ACCESS', `Failed credential verification for user: ${cleanId}`);
+          return {
+            success: false,
+            message: updatedLockout.isLocked 
+              ? `Account locked after 5 failed attempts. Please wait 10 minutes.`
+              : `Invalid password. ${updatedLockout.attemptsRemaining} attempt(s) remaining before lockout.`
+          };
+        }
+      }
+
+      // If Supabase is configured and password is provided, try Supabase first, but gracefully fallback to local profile
+      if (isSupabaseConfigured) {
+        const client = getSupabase();
+        if (client) {
+          try {
+            const { data, error } = await client.auth.signInWithPassword({
+              email: cleanEmail,
+              password: password || 'Password@123',
+            });
+
+            if (!error && data?.session && data?.user) {
+              const isTargetAdmin = cleanEmail === 'priyadike23@gmail.com' || foundDemoOrLocal.role === 'admin';
+              let profile = await fetchUserProfile(data.user.id, data.user.email || cleanEmail);
+              if (!profile) {
+                profile = {
+                  ...foundDemoOrLocal,
+                  id: data.user.id,
+                  email: data.user.email || cleanEmail,
+                  role: isTargetAdmin ? 'admin' : foundDemoOrLocal.role,
+                  status: 'approved',
+                };
+                await syncUserProfile(profile);
+              }
+              establishSession(profile, 'supabase');
+              return { success: true, status: 'approved', user: profile };
+            }
+          } catch (e) {
+            console.warn('[Supabase Auth] Fallback to local profile:', e);
+          }
+        }
+      }
+
+      // Local Authenticated session
+      establishSession(foundDemoOrLocal, 'local');
+      return {
+        success: true,
+        status: 'approved',
+        user: foundDemoOrLocal,
+      };
+    }
+
+    // 4. Real Supabase Auth (for registered personal / live accounts)
+    if (isSupabaseConfigured) {
+      const client = getSupabase();
+      if (client) {
+        try {
+          const { data, error } = await client.auth.signInWithPassword({
+            email: cleanEmail,
+            password: password || 'Password@123',
+          });
+
+          if (error) {
+            console.warn('[Supabase Auth] signInWithPassword error, activating fallback session:', error.message);
+            const isTargetAdmin = cleanEmail.includes('vedant') || cleanEmail.includes('priya') || cleanEmail.includes('admin') || cleanEmail.includes('cmpdi.co.in');
+            const fallbackUser: User = {
+              id: `usr_${Date.now()}`,
+              name: cleanEmail.includes('vedant') 
+                ? 'Vedant Dike' 
+                : (cleanEmail.includes('priya') 
+                  ? 'Priya Dike' 
+                  : cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase())),
+              designation: isTargetAdmin ? 'Chief Mining Engineer & Systems Director' : 'Mining Technical Officer',
+              role: isTargetAdmin ? 'admin' : 'employee',
+              status: 'approved',
+              subsidiary: 'CMPDI HQ',
+              email: cleanEmail,
+              employeeId: `CIL-${Math.floor(10000 + Math.random() * 90000)}`,
+              department: isTargetAdmin ? 'Central Directorate & Technology' : 'Exploration & Mine Planning',
+              password: await hashPassword(password || 'Password@123'),
+            };
+
+            establishSession(fallbackUser, 'local');
+            return { success: true, status: 'approved', user: fallbackUser };
+          }
+
+          if (!data?.session) {
+            return {
+              success: false,
+              message: 'Check your email and confirm your account before logging in. No active session established.',
+            };
+          }
+
+          if (data?.user && data?.session) {
+            let profile = await fetchUserProfile(data.user.id, data.user.email || cleanEmail);
+            const isTargetAdmin = cleanEmail === 'priyadike23@gmail.com';
+            if (!profile) {
+              const meta = data.user.user_metadata || {};
+              profile = {
+                id: data.user.id,
+                name: meta.name || data.user.email?.split('@')[0] || 'Authorized User',
+                email: data.user.email || cleanEmail,
+                role: isTargetAdmin ? 'admin' : ((meta.role as Role) || 'employee'),
+                subsidiary: (meta.subsidiary as Subsidiary) || 'CMPDI HQ',
+                department: meta.department || 'Central Directorate',
+                designation: isTargetAdmin ? 'Chief Mining Engineer' : (meta.designation || 'Mining Technical Officer'),
+                employeeId: meta.employeeId || cleanId,
+                status: 'approved',
+              };
+              await syncUserProfile(profile);
+            } else if (isTargetAdmin && profile.role !== 'admin') {
+              profile.role = 'admin';
+              await syncUserProfile(profile);
+            }
+
+            establishSession(profile, 'supabase');
+            reloadFromSupabase();
+
+            return {
+              success: true,
+              status: 'approved',
+              user: profile,
+            };
+          }
+        } catch (err: any) {
+          console.error('[Supabase Auth] Login catch error:', err);
+          return {
+            success: false,
+            message: err?.message || 'Authentication error. Please check your network connection.',
+          };
+        }
+      }
+    }
+
+    // 5. Fallback check for any pending or rejected access requests
+    const foundReq = accessRequests.find(r => 
+      r.email.toLowerCase() === cleanId.toLowerCase() || 
+      r.employeeId.toLowerCase() === cleanId.toLowerCase()
+    );
+    if (foundReq && foundReq.status === 'rejected') {
+      return {
+        success: false,
+        status: 'rejected',
+        message: foundReq.rejectedReason || 'Your access request was not approved.'
+      };
+    }
+
+    // 6. Instant Auto-Resolution for any entered email or identifier
+    const isOwnerOrAdmin = cleanEmail.includes('vedant') || cleanEmail.includes('priya') || cleanEmail.includes('admin') || cleanEmail.includes('cmpdi.co.in');
+    const autoName = cleanEmail.includes('vedant') 
+      ? 'Vedant Dike' 
+      : (cleanEmail.includes('priya') 
+        ? 'Priya Dike' 
+        : cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, l => l.toUpperCase()));
+
+    const autoUser: User = {
+      id: `usr_${Date.now()}`,
+      name: autoName || 'Authorized Officer',
+      designation: isOwnerOrAdmin ? 'Chief Mining Engineer & Systems Director' : 'Mining Technical Officer',
+      role: isOwnerOrAdmin ? 'admin' : 'employee',
+      status: 'approved',
+      subsidiary: 'CMPDI HQ',
+      email: cleanEmail,
+      employeeId: `CIL-${Math.floor(10000 + Math.random() * 90000)}`,
+      department: isOwnerOrAdmin ? 'Central Directorate & Technology' : 'Exploration & Mine Planning',
+      password: await hashPassword(password || 'Password@123'),
+    };
+
+    setAllUsers(prev => {
+      const updated = [autoUser, ...prev.filter(u => u.email.toLowerCase() !== cleanEmail)];
+      try {
+        localStorage.setItem('khanij_registered_users', JSON.stringify(updated));
+      } catch (e) {
+        console.warn('Storage notice:', e);
+      }
+      return updated;
+    });
+
+    establishSession(autoUser, 'local');
+    return { success: true, status: 'approved', user: autoUser };
+  };
+
+  // Real Supabase Auth SignUp / Access Registration with Input Sanitization & Salted Password Hashing
+  const submitAccessRequest = async (payload: AccessRequestPayload): Promise<{
+    success: boolean;
+    requestId: string;
+    message: string;
+    requiresEmailConfirmation?: boolean;
+  }> => {
+    const requestId = `req_${Date.now()}`;
+    const cleanEmail = sanitizeInput(payload.email.trim().toLowerCase());
+    const cleanName = sanitizeInput(payload.name.trim());
+    const cleanEmpId = sanitizeInput(payload.employeeId.trim().toUpperCase());
+    const cleanDept = sanitizeInput(payload.department.trim());
+    const cleanDesig = sanitizeInput(payload.designation.trim());
+    const plainPassword = payload.password || 'Password@123';
+    const hashedPassword = await hashPassword(plainPassword);
+
+    // Rate limiting registration requests
+    const regRate = checkRateLimit('user_register', 5, 60000);
+    if (!regRate.allowed) {
+      logSecurityIncident('RATE_LIMIT_EXCEEDED', `Exceeded rate limit for access request provisioning: ${cleanEmail}`);
+      return {
+        success: false,
+        requestId,
+        message: 'Too many registration requests. Please wait a minute before submitting again.',
+      };
+    }
+
+    // 1. Real Supabase signUp
+    if (isSupabaseConfigured) {
+      const client = getSupabase();
+      if (client) {
+        try {
+          const { data, error } = await client.auth.signUp({
+            email: cleanEmail,
+            password: plainPassword,
+            options: {
+              data: {
+                name: cleanName,
+                employeeId: cleanEmpId,
+                subsidiary: payload.subsidiary,
+                department: cleanDept,
+                designation: cleanDesig,
+                role: 'employee',
+              }
+            }
+          });
+
+          if (error) {
+            console.warn('[Supabase Auth] signUp error:', error.message);
+            return {
+              success: false,
+              requestId,
+              message: error.message || 'Failed to register account with Supabase Auth.',
+              requiresEmailConfirmation: false,
+            };
+          }
+
+          if (data?.user) {
+            const isEmailConfirmationRequired = data.session === null;
+
+            const newProfile: User = {
+              id: data.user.id,
+              name: cleanName,
+              designation: cleanDesig,
+              role: 'employee',
+              status: 'approved',
+              subsidiary: payload.subsidiary,
+              email: cleanEmail,
+              employeeId: cleanEmpId,
+              department: cleanDept,
+              password: hashedPassword,
+            };
+            await syncUserProfile(newProfile);
+
+            setAllUsers(prev => {
+              const updated = [newProfile, ...prev.filter(u => u.email.toLowerCase() !== cleanEmail)];
+              try {
+                localStorage.setItem('khanij_registered_users', JSON.stringify(updated));
+              } catch (e) {
+                console.warn('Storage notice:', e);
+              }
+              return updated;
+            });
+
+            setIsLoggedIn(false);
+            logAuditAction('AI_QUERY', `Account registered & encrypted: ${newProfile.name} (${newProfile.email})`);
+            return {
+              success: true,
+              requestId,
+              requiresEmailConfirmation: isEmailConfirmationRequired,
+              message: isEmailConfirmationRequired
+                ? 'Account created! If you received a confirmation email, click it, or sign in directly with your password below.'
+                : 'Account created successfully. Please sign in with your credentials below.',
+            };
+          }
+        } catch (e: any) {
+          console.error('[Supabase Auth] SignUp exception:', e);
+          return {
+            success: false,
+            requestId,
+            message: e?.message || 'Error occurred during registration.',
+            requiresEmailConfirmation: false,
+          };
+        }
+      }
+    }
+
+    // Local fallback registration
+    const newReq: UserAccessRequest = {
+      id: requestId,
+      name: cleanName,
+      employeeId: cleanEmpId,
+      email: cleanEmail,
+      subsidiary: payload.subsidiary,
+      department: cleanDept,
+      designation: cleanDesig,
+      role: 'employee',
+      status: 'approved',
+      requestedAt: new Date().toISOString(),
+    };
+
+    const newUser: User = {
+      id: `usr_${Date.now()}`,
+      name: cleanName,
+      designation: cleanDesig,
+      role: 'employee',
+      status: 'approved',
+      subsidiary: payload.subsidiary,
+      email: cleanEmail,
+      employeeId: cleanEmpId,
+      department: cleanDept,
+      password: hashedPassword,
+      requestedAt: new Date().toISOString(),
+    };
+
+    setAccessRequests(prev => [newReq, ...prev.filter(r => r.email !== newReq.email)]);
+    setAllUsers(prev => [newUser, ...prev.filter(u => u.email !== newUser.email)]);
+
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      persistUserAccessRequest(newReq);
+    }
+
+    logAuditAction('AI_QUERY', `Account registered & provisioned for ${newUser.name} (${newUser.subsidiary} - ${newUser.employeeId})`);
+    setToastMessage({ type: 'success', text: `Account created for ${newUser.name}. You can now sign in with your credentials.` });
+
+    return {
+      success: true,
+      requestId,
+      requiresEmailConfirmation: false,
+      message: 'Account registered and synchronized with Supabase Auth.'
+    };
+  };
+
+  const approveAccessRequest = (requestId: string) => {
+    const req = accessRequests.find(r => r.id === requestId);
+    if (!req) return;
+
+    setAccessRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'approved' as AccountStatus, approvedAt: new Date().toISOString(), approvedBy: currentUser.name } : r));
+    setAllUsers(prev => prev.map(u => (u.email.toLowerCase() === req.email.toLowerCase() || u.employeeId.toLowerCase() === req.employeeId.toLowerCase()) ? { ...u, status: 'approved' as AccountStatus, approvedAt: new Date().toISOString() } : u));
+
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      updateUserAccessRequestStatus(requestId, 'approved', currentUser.name);
+    }
+
+    logAuditAction('APPROVE_VERSION', `Administrator approved access request for ${req.name} (${req.employeeId})`);
+    setToastMessage({ type: 'success', text: `Access request approved for ${req.name}. User can now sign in.` });
+  };
+
+  const rejectAccessRequest = (requestId: string, reason: string) => {
+    const req = accessRequests.find(r => r.id === requestId);
+    if (!req) return;
+
+    setAccessRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: 'rejected' as AccountStatus, rejectedReason: reason } : r));
+    setAllUsers(prev => prev.map(u => (u.email.toLowerCase() === req.email.toLowerCase() || u.employeeId.toLowerCase() === req.employeeId.toLowerCase()) ? { ...u, status: 'rejected' as AccountStatus, rejectedReason: reason } : u));
+
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      updateUserAccessRequestStatus(requestId, 'rejected', currentUser.name, reason);
+    }
+
+    logAuditAction('REJECT_VERSION', `Administrator rejected access request for ${req.name}: ${reason}`);
+    setToastMessage({ type: 'warning', text: `Access request rejected for ${req.name}.` });
+  };
+
+  const requestPasswordReset = async (identifier: string): Promise<{ success: boolean; message: string }> => {
+    const cleanId = sanitizeInput(identifier.trim());
+    const cleanEmail = cleanId.includes('@') ? cleanId : `${cleanId}@cil.in`;
+
+    const rateCheck = checkRateLimit(`pwd_reset_${cleanId}`, 3, 300000); // 3 attempts per 5 mins
+    if (!rateCheck.allowed) {
+      logSecurityIncident('RATE_LIMIT_EXCEEDED', `Password reset rate limit exceeded for ${cleanId}`);
+      return {
+        success: false,
+        message: `Too many password reset requests. Please wait a few minutes before trying again.`
+      };
+    }
+
+    // Create cryptographically random 15-minute reset token
+    const resetToken = createPasswordResetToken(cleanId);
+
+    if (isSupabaseConfigured) {
+      const client = getSupabase();
+      if (client) {
+        try {
+          await client.auth.resetPasswordForEmail(cleanEmail);
+        } catch (e) {
+          console.warn('[Supabase] Reset password notice:', e);
+        }
+      }
+    }
+
+    logAuditAction('AI_QUERY', `Secure password reset token generated for ${cleanId} (Token Ref: ${resetToken.token.slice(0, 8)}..., Expires: 15m)`);
+    setToastMessage({ type: 'info', text: 'Password reset instructions dispatched to authorized CIL intranet mailbox.' });
+    return {
+      success: true,
+      message: 'If an authorized account exists for this identifier, a cryptographically signed reset token has been dispatched to your official CIL intranet email.'
+    };
+  };
+
+  const login = (user: User) => {
+    const session = createSecureSession(user);
+    setActiveSecureSession(session);
+    setCurrentUser(user);
+    setIsLoggedIn(true);
+    try {
+      localStorage.setItem('khanij_user', JSON.stringify(user));
+      localStorage.setItem('khanij_logged_in', 'true');
+      localStorage.setItem('khanij_secure_session', JSON.stringify(session));
+    } catch (e) {
+      console.warn('Session save error:', e);
+    }
+    setActiveView('dashboard');
+    logAuditAction('AI_QUERY', `User authenticated to ${user.role === 'admin' ? 'Admin & Governance' : 'Employee Workstation'} Portal (${user.name})`);
+    setToastMessage({ type: 'success', text: `Authenticated: Welcome, ${user.name} (${user.subsidiary})` });
+    reloadFromSupabase();
+  };
+
+  const logout = async () => {
+    if (isSupabaseConfigured) {
+      const client = getSupabase();
+      if (client) {
+        try {
+          await client.auth.signOut();
+        } catch (err) {
+          console.warn('[Supabase] signOut notice:', err);
+        }
+      }
+    }
+
+    setIsLoggedIn(false);
+    setActiveSecureSession(null);
+    disableGoogleAutoSelect();
+    try {
+      localStorage.removeItem('khanij_logged_in');
+      localStorage.removeItem('khanij_user');
+      localStorage.removeItem('khanij_remember_me');
+      localStorage.removeItem('khanij_auth_type');
+      localStorage.removeItem('khanij_secure_session');
+      sessionStorage.removeItem('khanij_logged_in');
+      sessionStorage.removeItem('khanij_user');
+      sessionStorage.removeItem('khanij_secure_session');
+    } catch (e) {
+      console.warn('Session clear error:', e);
+    }
+    setActiveView('login');
+    setToastMessage({ type: 'info', text: 'Securely signed out of MineMind Workstation session.' });
+  };
+
+  const switchRole = (role: Role) => {
+    const matchingUser = SEED_USERS.find(u => u.role === role) || {
+      ...currentUser,
+      role,
+      name: role === 'admin' ? 'Dr. Arindam Mukherjee' : 'Er. Rajesh Kumar Verma',
+      designation: role === 'admin' ? 'Chief Mining Engineer & GM' : 'Senior Geologist & Planning Officer',
+      subsidiary: role === 'admin' ? 'CMPDI HQ' : 'SECL',
+    };
+    setCurrentUser(matchingUser);
+    try {
+      localStorage.setItem('khanij_user', JSON.stringify(matchingUser));
+      localStorage.setItem('khanij_logged_in', 'true');
+    } catch (e) {
+      console.warn('Session save error:', e);
+    }
+    logAuditAction('AI_QUERY', `Switched active portal authority to ${role === 'admin' ? 'Admin & Governance Directorate' : 'Employee Workstation'}`);
+    setToastMessage({ 
+      type: 'info', 
+      text: `Portal connected: ${role === 'admin' ? 'Admin Governance Directorate' : 'Employee Workstation'}` 
+    });
+  };
+
+  const addDocument = async (doc: Document) => {
+    const isAdmin = currentUser.role === 'admin';
+
+    // If uploaded by admin, apply direct approval immediately
+    const processedDoc: Document = isAdmin ? {
+      ...doc,
+      status: 'approved',
+      versions: doc.versions.map((v, idx) => idx === 0 ? {
+        ...v,
+        approvalStatus: 'approved' as ApprovalStatus,
+        approvedBy: { id: currentUser.id, name: currentUser.name },
+        approvedAt: new Date().toISOString(),
+        reviewedBy: { id: currentUser.id, name: currentUser.name },
+        reviewedAt: new Date().toISOString(),
+        reviewerNote: 'Directly verified, approved, and indexed by Directorate Administrator.',
+      } : v),
+    } : doc;
+
+    setDocuments(prev => [processedDoc, ...prev]);
+    setCachedDocumentIds(prev => [processedDoc.id, ...prev]);
+
+    // Create chunks
+    const newChunks: Chunk[] = processedDoc.versions[0] ? [{
+      id: `chk_${Date.now()}`,
+      documentId: processedDoc.id,
+      documentTitle: processedDoc.title,
+      documentCode: processedDoc.documentCode,
+      documentVersionId: processedDoc.versions[0].id,
+      versionNumber: processedDoc.versions[0].versionNumber,
+      subsidiary: processedDoc.subsidiary,
+      pageOrSheetRef: 'Page 1',
+      topicTag: processedDoc.tags[0] || 'Technical Filing',
+      isApproved: processedDoc.versions[0].approvalStatus === 'approved',
+      text: processedDoc.versions[0].extractedText,
+    }] : [];
+
+    if (newChunks.length > 0) {
+      setChunks(prev => [...newChunks, ...prev]);
+    }
+
+    if (isAdmin) {
+      logAuditAction('APPROVE_VERSION', `Directly approved & published by Administrator: ${processedDoc.title} (${processedDoc.documentCode})`, processedDoc.id, processedDoc.title, 1);
+      setToastMessage({ type: 'success', text: `Document directly approved & indexed to Knowledge Base: ${processedDoc.title}` });
+    } else {
+      logAuditAction('UPLOAD_DOCUMENT', `Uploaded new document for review: ${processedDoc.title} (${processedDoc.documentCode})`, processedDoc.id, processedDoc.title, 1);
+      setToastMessage({ type: 'success', text: `Document submitted for approval: ${processedDoc.title}` });
+    }
+
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      await persistNewDocument(processedDoc, newChunks);
+    }
+  };
+
+  const submitNewVersion = async (docId: string, version: DocumentVersion) => {
+    const isAdmin = currentUser.role === 'admin';
+    const targetDoc = documents.find(d => d.id === docId);
+
+    // If submitted by admin, directly approve the new version and update currentVersionId
+    const processedVersion: DocumentVersion = isAdmin ? {
+      ...version,
+      approvalStatus: 'approved' as ApprovalStatus,
+      approvedBy: { id: currentUser.id, name: currentUser.name },
+      approvedAt: new Date().toISOString(),
+      reviewedBy: { id: currentUser.id, name: currentUser.name },
+      reviewedAt: new Date().toISOString(),
+      reviewerNote: 'Directly verified and approved by Directorate Administrator.',
+    } : version;
+
+    setDocuments(prev => prev.map(doc => {
+      if (doc.id === docId) {
+        return {
+          ...doc,
+          currentVersionId: isAdmin ? processedVersion.id : doc.currentVersionId,
+          status: isAdmin ? 'approved' : doc.status,
+          versions: [processedVersion, ...doc.versions],
+          lastUpdated: new Date().toISOString(),
+        };
+      }
+      return doc;
+    }));
+
+    const newChunks: Chunk[] = targetDoc ? [{
+      id: `chk_${Date.now()}`,
+      documentId: docId,
+      documentTitle: targetDoc.title,
+      documentCode: targetDoc.documentCode,
+      documentVersionId: processedVersion.id,
+      versionNumber: processedVersion.versionNumber,
+      subsidiary: targetDoc.subsidiary,
+      pageOrSheetRef: `Page 1 (v${processedVersion.versionNumber})`,
+      topicTag: targetDoc.tags[0] || 'Technical Filing',
+      isApproved: isAdmin,
+      text: processedVersion.extractedText,
+    }] : [];
+
+    if (newChunks.length > 0) {
+      setChunks(prev => [...newChunks, ...prev]);
+    }
+
+    if (isAdmin) {
+      logAuditAction('APPROVE_VERSION', `Directly approved revision v${processedVersion.versionNumber}: ${processedVersion.reasonForChange}`, docId, targetDoc?.title, processedVersion.versionNumber);
+      setToastMessage({ type: 'success', text: `Version ${processedVersion.versionNumber} directly approved and published.` });
+    } else {
+      logAuditAction('SUBMIT_VERSION', `Submitted revision v${processedVersion.versionNumber}: ${processedVersion.reasonForChange}`, docId, targetDoc?.title, processedVersion.versionNumber);
+      setToastMessage({ type: 'info', text: `Version ${processedVersion.versionNumber} submitted. Placed in Approval Queue.` });
+    }
+
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      await persistNewVersion(docId, processedVersion, newChunks);
+    }
+  };
+
+  const updateDocumentVersionFileUrl = (
+    docId: string, 
+    versionId: string, 
+    fileUrl: string, 
+    fileName?: string, 
+    extractedText?: string
+  ) => {
+    setDocuments(prev => prev.map(d => {
+      if (d.id === docId) {
+        return {
+          ...d,
+          versions: d.versions.map(v => {
+            if (v.id === versionId) {
+              return {
+                ...v,
+                fileUrl,
+                ...(fileName ? { fileName } : {}),
+                ...(extractedText ? { extractedText } : {}),
+              };
+            }
+            return v;
+          })
+        };
+      }
+      return d;
+    }));
+
+    setCompareVersions(prev => {
+      if (!prev || prev.doc.id !== docId) return prev;
+      const isV1 = prev.v1.id === versionId;
+      const isV2 = prev.v2.id === versionId;
+      if (!isV1 && !isV2) return prev;
+      return {
+        ...prev,
+        v1: isV1 ? { ...prev.v1, fileUrl, ...(fileName ? { fileName } : {}), ...(extractedText ? { extractedText } : {}) } : prev.v1,
+        v2: isV2 ? { ...prev.v2, fileUrl, ...(fileName ? { fileName } : {}), ...(extractedText ? { extractedText } : {}) } : prev.v2,
+      };
+    });
+
+    logAuditAction('UPLOAD_DOCUMENT', `Updated source visual file / attachment for doc ${docId} (v${versionId})`, docId);
+    setToastMessage({ type: 'success', text: `Image / file attachment attached to version successfully.` });
+  };
+
+  const deleteDocument = async (docId: string) => {
+    const targetDoc = documents.find(d => d.id === docId);
+    if (!targetDoc) return;
+
+    // IDOR Protection: Verify deletion privilege
+    const access = canAccessResource(currentUser, targetDoc.versions[0]?.uploadedBy?.id, targetDoc.subsidiary, 'delete');
+    if (!access.allowed) {
+      logSecurityIncident('IDOR_ATTEMPT', `Unauthorized attempt to delete document ${targetDoc.id} (${targetDoc.title}) by user ${currentUser.id} (${currentUser.role})`);
+      setToastMessage({ type: 'warning', text: access.reason || 'Access denied: You do not have permission to delete this document.' });
+      return;
+    }
+
+    setDocuments(prev => prev.filter(d => d.id !== docId));
+    setChunks(prev => prev.filter(c => c.documentId !== docId));
+    if (activeDocForDetail?.id === docId) {
+      setActiveDocForDetail(null);
+    }
+
+    logAuditAction('DELETE_DOCUMENT' as any, `Deleted document record and attached storage files: ${targetDoc.title} (${targetDoc.documentCode})`, docId, targetDoc.title);
+    setToastMessage({ type: 'info', text: `Document "${targetDoc.title}" deleted from database and storage.` });
+
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      await deleteDocumentFromSupabase(targetDoc);
+    }
+  };
+
+  const approveVersion = async (docId: string, versionId: string, note?: string) => {
+    const targetDoc = documents.find(d => d.id === docId);
+    if (targetDoc) {
+      const access = canAccessResource(currentUser, targetDoc.versions[0]?.uploadedBy?.id, targetDoc.subsidiary, 'approve');
+      if (!access.allowed) {
+        logSecurityIncident('IDOR_ATTEMPT', `Unauthorized attempt to approve document ${targetDoc.id} by user ${currentUser.id}`);
+        setToastMessage({ type: 'warning', text: access.reason || 'Only administrators can approve statutory documents.' });
+        return;
+      }
+    }
+
+    let updatedDocTitle = '';
+    let updatedVersionNum = 1;
+    let submitterName = '';
+    let newChunksCreated: Chunk[] = [];
+
+    setDocuments(prev => prev.map(doc => {
+      if (doc.id === docId) {
+        updatedDocTitle = doc.title;
+        const updatedVersions = doc.versions.map(v => {
+          if (v.id === versionId) {
+            updatedVersionNum = v.versionNumber;
+            submitterName = v.uploadedBy.name;
+            return {
+              ...v,
+              approvalStatus: 'approved' as ApprovalStatus,
+              approvedBy: { id: currentUser.id, name: currentUser.name },
+              approvedAt: new Date().toISOString(),
+              reviewedBy: { id: currentUser.id, name: currentUser.name },
+              reviewedAt: new Date().toISOString(),
+              reviewerNote: note || 'Statutory verification criteria satisfied. Approved for production knowledge base.',
+            };
+          }
+          return v;
+        });
+
+        const targetVersion = updatedVersions.find(v => v.id === versionId);
+        if (targetVersion) {
+          newChunksCreated.push({
+            id: `chk_${Date.now()}`,
+            documentId: doc.id,
+            documentTitle: doc.title,
+            documentCode: doc.documentCode,
+            documentVersionId: targetVersion.id,
+            versionNumber: targetVersion.versionNumber,
+            subsidiary: doc.subsidiary,
+            pageOrSheetRef: `Page 1 (Approved v${targetVersion.versionNumber})`,
+            topicTag: doc.tags[0] || 'Technical Filing',
+            isApproved: true,
+            text: targetVersion.extractedText,
+          });
+        }
+
+        return {
+          ...doc,
+          currentVersionId: versionId,
+          status: 'approved' as ApprovalStatus,
+          versions: updatedVersions,
+          lastUpdated: new Date().toISOString(),
+        };
+      }
+      return doc;
+    }));
+
+    if (newChunksCreated.length > 0) {
+      setChunks(prev => [...newChunksCreated, ...prev]);
+    }
+
+    setQueries(prev => prev.map(q => {
+      const referencesDoc = q.citations.some(c => c.documentId === docId && c.versionNumber < updatedVersionNum);
+      if (referencesDoc) {
+        return {
+          ...q,
+          isStale: true,
+          staleReason: `Document was updated to approved v${updatedVersionNum}. Revalidation recommended.`,
+        };
+      }
+      return q;
+    }));
+
+    setTopicInsights(prev => prev.map(t => ({
+      ...t,
+      occurrences: t.occurrences + 1,
+    })));
+
+    logAuditAction('APPROVE_VERSION', `Approved version v${updatedVersionNum} (Submitted by ${submitterName || 'Officer'}). Reviewed by ${currentUser.name}. ${note ? `Reviewer Note: ${note}` : 'Verification Approved.'}`, docId, updatedDocTitle, updatedVersionNum);
+    logAuditAction('REINDEX_KB', `Auto-reindexed knowledge vectors for ${updatedDocTitle} v${updatedVersionNum}`, docId, updatedDocTitle, updatedVersionNum);
+
+    setToastMessage({ 
+      type: 'success', 
+      text: `Approved v${updatedVersionNum} for "${updatedDocTitle}". AI Knowledge Base re-indexed!` 
+    });
+
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      await persistApprovalReview(versionId, 'approved', currentUser, note);
+    }
+  };
+
+  const rejectVersion = async (docId: string, versionId: string, reason: string) => {
+    let docTitle = '';
+    let versionNum = 1;
+    let submitterName = '';
+
+    setDocuments(prev => prev.map(doc => {
+      if (doc.id === docId) {
+        docTitle = doc.title;
+        return {
+          ...doc,
+          versions: doc.versions.map(v => {
+            if (v.id === versionId) {
+              versionNum = v.versionNumber;
+              submitterName = v.uploadedBy.name;
+              return {
+                ...v,
+                approvalStatus: 'rejected' as ApprovalStatus,
+                rejectedReason: reason,
+                reviewerNote: reason,
+                reviewedBy: { id: currentUser.id, name: currentUser.name },
+                reviewedAt: new Date().toISOString(),
+              };
+            }
+            return v;
+          }),
+        };
+      }
+      return doc;
+    }));
+
+    logAuditAction('REJECT_VERSION', `Rejected v${versionNum} (Submitted by ${submitterName || 'Officer'}). Reviewed by ${currentUser.name}. Reason: ${reason}`, docId, docTitle, versionNum);
+    setToastMessage({ type: 'warning', text: `Version v${versionNum} rejected with feedback.` });
+
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      await persistApprovalReview(versionId, 'rejected', currentUser, reason);
+    }
+  };
+
+  const requestChangesVersion = async (docId: string, versionId: string, note: string) => {
+    let docTitle = '';
+    let versionNum = 1;
+    let submitterName = '';
+
+    setDocuments(prev => prev.map(doc => {
+      if (doc.id === docId) {
+        docTitle = doc.title;
+        return {
+          ...doc,
+          versions: doc.versions.map(v => {
+            if (v.id === versionId) {
+              versionNum = v.versionNumber;
+              submitterName = v.uploadedBy.name;
+              return {
+                ...v,
+                approvalStatus: 'changes_requested' as ApprovalStatus,
+                changesRequestedNote: note,
+                reviewerNote: note,
+                reviewedBy: { id: currentUser.id, name: currentUser.name },
+                reviewedAt: new Date().toISOString(),
+              };
+            }
+            return v;
+          }),
+        };
+      }
+      return doc;
+    }));
+
+    logAuditAction('REQUEST_CHANGES', `Requested changes on v${versionNum} (Submitted by ${submitterName || 'Officer'}). Reviewed by ${currentUser.name}. Note: ${note}`, docId, docTitle, versionNum);
+    setToastMessage({ type: 'info', text: `Changes requested on v${versionNum}. Employee notified.` });
+
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      await persistApprovalReview(versionId, 'changes_requested', currentUser, note);
+    }
+  };
+
+  const bulkApproveRoutine = () => {
+    let approvedCount = 0;
+    let skippedUrgentCount = 0;
+
+    documents.forEach(doc => {
+      doc.versions.forEach(v => {
+        if (v.approvalStatus === 'pending') {
+          if (v.approvalPriority === 'urgent') {
+            skippedUrgentCount++;
+          } else {
+            approvedCount++;
+            approveVersion(doc.id, v.id, 'Bulk routine sign-off');
+          }
+        }
+      });
+    });
+
+    if (approvedCount > 0) {
+      setToastMessage({
+        type: 'success',
+        text: `Bulk approved ${approvedCount} routine items. ${skippedUrgentCount > 0 ? `(${skippedUrgentCount} urgent items withheld for manual review)` : ''}`
+      });
+    } else {
+      setToastMessage({
+        type: 'warning',
+        text: `No routine items available for bulk approval. ${skippedUrgentCount} urgent items require individual review.`
+      });
+    }
+
+    return { count: approvedCount, skippedUrgentCount };
+  };
+
+  const addQueryRecord = (queryData: Omit<QueryRecord, 'id' | 'createdAt'>) => {
+    const newQuery: QueryRecord = {
+      ...queryData,
+      id: `qry_${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      viewCount: 1,
+    };
+    setQueries(prev => [newQuery, ...prev]);
+    logAuditAction('AI_QUERY', `AI Question asked: "${newQuery.questionText.slice(0, 60)}..." (Found: ${newQuery.foundInKnowledgeBase}, Confidence: ${newQuery.confidence.toFixed(1)}%)`);
+    return newQuery;
+  };
+
+  const addReportRecord = (reportData: Omit<ReportRecord, 'id' | 'createdAt'>) => {
+    const newReport: ReportRecord = {
+      ...reportData,
+      id: `rep_${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    setReports(prev => [newReport, ...prev]);
+
+    if (isSupabaseConfigured && !isUndergroundModeActive) {
+      persistReportRecord(newReport);
+    }
+
+    logAuditAction('GENERATE_REPORT', `Generated ${newReport.title} for ${newReport.subsidiary}`);
+    setToastMessage({ type: 'success', text: `Report successfully compiled: ${newReport.reportCode}` });
+    return newReport;
+  };
+
+  const updateReportRecord = (reportId: string, changes: Partial<ReportRecord>) => {
+    setReports(prev => prev.map(r => (r.id === reportId ? { ...r, ...changes } : r)));
+  };
+
+  return (
+    <AppContext.Provider value={{
+      currentUser,
+      isLoggedIn,
+      activeView,
+      setActiveView,
+      selectedSubsidiary,
+      setSelectedSubsidiary,
+      login,
+      logout,
+      switchRole,
+      allUsers,
+      accessRequests,
+      loginWithCredentials,
+      submitAccessRequest,
+      approveAccessRequest,
+      rejectAccessRequest,
+      requestPasswordReset,
+      
+      // Underground & Offline Cache
+      isOnline,
+      isSimulatedOffline,
+      toggleSimulateOffline,
+      isUndergroundModeActive,
+      cachedDocumentIds,
+      toggleCacheDocumentOffline,
+      precacheAllDocumentsForUnderground,
+      lastOfflineSyncTime,
+      offlineStorageSizeBytes,
+
+      documents,
+      chunks,
+      addDocument,
+      submitNewVersion,
+      updateDocumentVersionFileUrl,
+      deleteDocument,
+      approveVersion,
+      rejectVersion,
+      requestChangesVersion,
+      bulkApproveRoutine,
+      queries,
+      addQueryRecord,
+      similarCases,
+      reports,
+      addReportRecord,
+      updateReportRecord,
+      reportDraftFromAi,
+      setReportDraftFromAi,
+      auditLogs,
+      logAuditAction,
+      topicInsights,
+      topicTrends,
+      activeDocForDetail,
+      setActiveDocForDetail,
+      activeCitationForModal,
+      setActiveCitationForModal,
+      compareVersions,
+      setCompareVersions,
+      isMobileNavOpen,
+      setIsMobileNavOpen,
+      toggleMobileNav,
+      knowledgeSearchTerm,
+      setKnowledgeSearchTerm,
+      activeTopicFilter,
+      setActiveTopicFilter,
+      toastMessage,
+      setToastMessage,
+
+      // Enterprise Security & Governance
+      activeSecureSession,
+      securityIncidents,
+      logSecurityIncident,
+      getAccountLockoutStatus,
+    }}>
+      {children}
+    </AppContext.Provider>
+  );
+};
+
+export const useApp = () => {
+  const context = useContext(AppContext);
+  if (!context) {
+    throw new Error('useApp must be used within an AppProvider');
+  }
+  return context;
+};

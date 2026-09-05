@@ -1,0 +1,18 @@
+{
+  "short_name": "MineMind",
+  "name": "MineMind-AI — CMPDI & Coal India Knowledge Platform",
+  "description": "Source-grounded AI knowledge discovery, statutory reporting, and document verification for Coal India subsidiaries.",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#141C2B",
+  "theme_color": "#141C2B",
+  "display": "standalone",
+  "orientation": "any",
+  "scope": "/"
+}
